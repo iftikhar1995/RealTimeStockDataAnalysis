@@ -15,12 +15,12 @@ Following are the tools and technologies used in the project:
 
 # Implemented Architecture
 
-1- The data will be fetched from the source using Apache NiFi. After every 1 minuit, the Nifi will fetch the data from
+1. The data will be fetched from the source using Apache NiFi. After every 1 minuit, the Nifi will fetch the data from
 the source and will publish it to Apache Kafka.
-2- The Spark Application will then consume the data and convert it into a structured format.
-3- The structured data will be stored in cassandra.
-4- Then we'll transform the data and will put it into MongoDB.
-5- The transformed data will be printed on the console as well.
+2. The Spark Application will then consume the data and convert it into a structured format.
+3. The structured data will be stored in cassandra.
+4. Then we'll transform the data and will put it into MongoDB.
+5. The transformed data will be printed on the console as well.
 
 ![Real Time Stock Data Analysis Architecture](../master/ReadMe/RealTimeStockDataAnalysis.png)
  
