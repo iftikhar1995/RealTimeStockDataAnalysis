@@ -9,9 +9,15 @@ import org.apache.spark.sql.types._
 
 
 object StockAnalysisDataPipeline {
-
+  /**
+   * The function will provide the schema of the records that are present in
+   * the stream.
+   *
+   * @return the structure of the record in a stream
+   */
   def getStocksSchema(): StructType = {
 
+    // Defining the structure of the record in stream
     val stock_data_schema = StructType(
       Array(
         StructField("symbols_requested", IntegerType),
@@ -51,15 +57,25 @@ object StockAnalysisDataPipeline {
       )
     )
 
+    // Returning the structure.
     stock_data_schema
 
   }
 
+  /**
+   * The entry point of the program. It is responsible for performing the transformations
+   * and storing the data into the Cassandra and MongoDB
+   *
+   * @param args : The command line arguments that will be passed to the program
+   */
   def main(args: Array[String]): Unit = {
+
     println("Real-Time Data Pipeline Started ...")
 
+    // DataPipelineConfiguration contains the configurations required to run the spark
+    // application
     val conf = new DataPipelineConfiguration()
-
+    // Getting the spark session
     // To run locally
     val spark = SparkSession.builder
       .master("local[*]")
@@ -71,8 +87,10 @@ object StockAnalysisDataPipeline {
 //      .appName("Stocks Data Analysis")
 //      .getOrCreate()
 
+    // Setting the logging level to ERROR
     spark.sparkContext.setLogLevel("ERROR")
 
+    // Getting the streaming data from spark
     val stocks_data_df = spark.readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", conf.KAFKA_BOOTSTRAP_SERVERS)
@@ -80,12 +98,21 @@ object StockAnalysisDataPipeline {
       .option("startingOffsets", "latest")
       .load()
 
+    // Getting the schema of the incoming data
     val stock_data_schema = getStocksSchema()
 
+    // Since the data coming from the kafka will be in binary format, so converting it into
+    // string
     val unstructured_stock_data = stocks_data_df.selectExpr("CAST(value AS STRING)")
 
+    // A user define function that will give the UUID. UUID will be used as Primary Key in
+    // Cassandra
     val uuid = udf(() => java.util.UUID.randomUUID().toString)
 
+    // To convert the data into desired format. It will add a column that shows the date and
+    // time of last trade of each stocks in UTC. This time will be calculate using
+    // the "last_trade_time" and "timezone_name" columns from the incoming data. Adding a
+    // column, named as 'pk', that will provide the unique id to each record
     val structured_stock_data = unstructured_stock_data
       .select(from_json(col("value"), stock_data_schema).as("all_stocks_detail"))
       .select(col("all_stocks_detail.*"))
@@ -99,6 +126,7 @@ object StockAnalysisDataPipeline {
         )
       ).withColumn("pk", uuid()).filter(col("stock_exchange_long").isNotNull)
 
+    // Writing the ingested data into cassandra without any modification
     structured_stock_data.writeStream
       .trigger(Trigger.ProcessingTime("5 seconds"))
       .outputMode("update")
@@ -113,6 +141,7 @@ object StockAnalysisDataPipeline {
           .save()
       }.start()
 
+    // Converting the incoming data into desired format
     val refined_stock_data = structured_stock_data.selectExpr(
       "symbol", "name", "currency",
       "cast(price as double) price",
@@ -143,19 +172,17 @@ object StockAnalysisDataPipeline {
       "pk"
     )
 
+    // Creating the MongoDB URI. This URI will be used in storing the transformed data into MongoDB
     val spark_mongodb_output_uri = "mongodb://" + conf.MONGODB_USER + ":" + conf.MONGODB_PASSWORD + "@" +
                                     conf.MONGODB_HOST_NAME + ":" + conf.MONGODB_PORT + "/" + conf.MONGODB_DATABASE +
                                     ".stocks"
     println("Printing spark_mongodb_output_uri: " + spark_mongodb_output_uri)
 
+    // Writing the transformed data into mongoDB
     refined_stock_data.writeStream
       .trigger(Trigger.ProcessingTime("5 seconds"))
       .outputMode("update")
       .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
-        //val batchDF_1 = batchDF.withColumn("batch_id", lit(batchId))
-        // Transform batchDF and write it to sink/target/persistent storage
-        // Write data from spark dataframe to database
-
         batchDF.write
           .format("mongo")
           .mode("append")
@@ -165,6 +192,7 @@ object StockAnalysisDataPipeline {
           .save()
       }.start()
 
+    // To display the transformed data on the console
     val stocks_data_write_stream = refined_stock_data
       .writeStream
       .trigger(Trigger.ProcessingTime("5 seconds"))
@@ -172,8 +200,8 @@ object StockAnalysisDataPipeline {
       .option("truncate", "false")
       .format("console")
       .start()
-    // Code Block 4 Ends Here
 
+    // waiting for the termination signal from user
     stocks_data_write_stream.awaitTermination()
 
     println("Real-Time Data Pipeline Completed.")
